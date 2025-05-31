@@ -22,21 +22,15 @@ try:
         match = re.search(r"Your Net Portfolio Value: \$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)", text)
         portfolio_value = match.group(1) if match else "Not found"
 
-        holdings_match = re.search(r"Top Holdings\n(.*?)Asset Allocation", text, re.DOTALL)
-        holdings_text = holdings_match.group(1).strip() if holdings_match else ""
-        holdings_lines = [
-            line.strip() for line in holdings_text.split('\n')
-            if line.strip() and not line.startswith("Description") and not line.startswith("Total")
-        ]
-
         holdings_data = []
-        for line in holdings_lines:
-            match = re.match(r"(.+?)\s+\$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+(\d+)%", line)
-            if match:
-                name = match.group(1).strip()
-                value = float(match.group(2).replace(",", ""))
-                percent = int(match.group(3))
-                holdings_data.append({"Holding": name, "Value ($)": value, "% of Portfolio": percent})
+        possible_holdings = re.findall(r"(?m)^(.+?)\s+\$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+(\d+)%$", text)
+        for name, value_str, percent_str in possible_holdings:
+            try:
+                value = float(value_str.replace(",", ""))
+                percent = int(percent_str)
+                holdings_data.append({"Holding": name.strip(), "Value ($)": value, "% of Portfolio": percent})
+            except:
+                continue
 
         df_holdings = pd.DataFrame(holdings_data)
 
@@ -49,6 +43,8 @@ try:
             if not df_holdings.empty:
                 st.subheader("📋 Top Holdings")
                 st.dataframe(df_holdings, use_container_width=True)
+            else:
+                st.warning("No holdings data found. Please check if your statement includes a holdings breakdown.")
 
         with col2:
             if not df_holdings.empty:
@@ -57,6 +53,15 @@ try:
                 ax.pie(df_holdings["% of Portfolio"], labels=df_holdings["Holding"], autopct='%1.1f%%', startangle=140)
                 ax.axis('equal')
                 st.pyplot(fig)
+
+        if not df_holdings.empty:
+            st.subheader("📈 Holdings Bar Chart")
+            fig2, ax2 = plt.subplots()
+            df_holdings_sorted = df_holdings.sort_values(by="Value ($)", ascending=False)
+            ax2.barh(df_holdings_sorted["Holding"], df_holdings_sorted["Value ($)"])
+            ax2.set_xlabel("Value ($)")
+            ax2.set_title("Holdings Breakdown")
+            st.pyplot(fig2)
 
         if openai_api_key and not df_holdings.empty:
             st.subheader("📝 AI-Powered Portfolio Summary")
