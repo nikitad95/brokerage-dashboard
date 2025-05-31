@@ -9,10 +9,9 @@ try:
     st.set_page_config(page_title="Brokerage Dashboard", layout="wide")
 
     st.title("📊 Brokerage Statement Dashboard")
-    st.markdown("Upload a Fidelity statement PDF and view a clear, visual summary of your portfolio.")
+    st.markdown("Upload a Fidelity statement PDF and view a clean summary of your portfolio.")
 
     openai_api_key = st.sidebar.text_input("Enter your OpenAI API key", type="password")
-
     uploaded_file = st.file_uploader("Upload your brokerage statement (PDF)", type="pdf")
 
     if uploaded_file:
@@ -26,9 +25,13 @@ try:
         possible_holdings = re.findall(r"(?m)^(.+?)\s+\$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+(\d+)%$", text)
         for name, value_str, percent_str in possible_holdings:
             try:
+                cleaned_name = name.strip()
+                if re.search(r"(?i)total|balance details|summary", cleaned_name):
+                    continue
                 value = float(value_str.replace(",", ""))
                 percent = int(percent_str)
-                holdings_data.append({"Holding": name.strip(), "Value ($)": value, "% of Portfolio": percent})
+                if value > 0 and percent > 0:
+                    holdings_data.append({"Holding": cleaned_name, "Value ($)": value, "% of Portfolio": percent})
             except:
                 continue
 
@@ -37,37 +40,37 @@ try:
         col1, col2 = st.columns([2, 1])
 
         with col1:
-            st.subheader("💼 Portfolio Summary")
+            st.subheader("💼 Portfolio Overview")
             st.metric("Net Portfolio Value", f"${portfolio_value}")
 
             if not df_holdings.empty:
-                st.subheader("📋 Top Holdings")
-                st.dataframe(df_holdings, use_container_width=True)
+                df_top = df_holdings.sort_values(by="Value ($)", ascending=False).head(10)
+                st.subheader("📋 Top 10 Holdings")
+                st.dataframe(df_top, use_container_width=True)
             else:
-                st.warning("No holdings data found. Please check if your statement includes a holdings breakdown.")
+                st.warning("No holdings found. Please upload a properly formatted statement.")
 
         with col2:
             if not df_holdings.empty:
-                st.subheader("🧩 Allocation")
+                st.subheader("🧩 Allocation Breakdown")
                 fig, ax = plt.subplots()
-                ax.pie(df_holdings["% of Portfolio"], labels=df_holdings["Holding"], autopct='%1.1f%%', startangle=140)
+                ax.pie(df_top["% of Portfolio"], labels=df_top["Holding"], autopct='%1.1f%%', startangle=140)
                 ax.axis('equal')
                 st.pyplot(fig)
 
         if not df_holdings.empty:
             st.subheader("📈 Holdings Bar Chart")
             fig2, ax2 = plt.subplots()
-            df_holdings_sorted = df_holdings.sort_values(by="Value ($)", ascending=False)
-            ax2.barh(df_holdings_sorted["Holding"], df_holdings_sorted["Value ($)"])
+            ax2.barh(df_top["Holding"], df_top["Value ($)"])
             ax2.set_xlabel("Value ($)")
-            ax2.set_title("Holdings Breakdown")
+            ax2.set_title("Top Holdings")
             st.pyplot(fig2)
 
         if openai_api_key and not df_holdings.empty:
-            st.subheader("📝 AI-Powered Portfolio Summary")
+            st.subheader("📝 AI Portfolio Summary")
             openai.api_key = openai_api_key
             try:
-                prompt = """Summarize this investment portfolio in a professional, easy-to-understand tone for a client.\n\n""" + df_holdings.to_string(index=False)
+                prompt = """Summarize this investment portfolio in a professional, clear format for a client:\n\n""" + df_top.to_string(index=False)
                 response = openai.ChatCompletion.create(
                     model="gpt-4",
                     messages=[
@@ -78,10 +81,10 @@ try:
                 summary = response['choices'][0]['message']['content']
                 st.write(summary)
             except Exception as e:
-                st.error(f"Failed to generate summary: {e}")
+                st.error(f"Failed to generate AI summary: {e}")
 
         st.markdown("---")
-        st.info("This is a prototype dashboard. For best results, upload Fidelity monthly statements. Output may vary depending on formatting.")
+        st.info("Prototype view only. Upload Fidelity statements for best results.")
 
 except ModuleNotFoundError as e:
     print("\nERROR: Missing module. Please ensure all dependencies are installed.")
