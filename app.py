@@ -1,96 +1,140 @@
-try:
-    import streamlit as st
-    import pdfplumber
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    import re
-    import openai
+import React, { useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Upload, FileText, BarChart3, PieChart, FileDown } from "lucide-react";
+import { ResponsiveContainer, Pie, PieChart as RechartsPieChart, Cell, BarChart as RechartsBarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
 
-    st.set_page_config(page_title="Brokerage Dashboard", layout="wide")
+const COLORS = ["#4B8BBE", "#306998", "#FFE873", "#FFD43B", "#646464"];
 
-    st.title("📊 Brokerage Statement Dashboard")
-    st.markdown("Upload a Fidelity statement PDF and view a clean summary of your portfolio.")
+export default function Dashboard() {
+  const [fileName, setFileName] = useState("");
+  const [summary, setSummary] = useState("");
+  const [uploaded, setUploaded] = useState(false);
+  const [totalValue, setTotalValue] = useState("$1.2M");
 
-    openai_api_key = st.sidebar.text_input("Enter your OpenAI API key", type="password")
-    uploaded_file = st.file_uploader("Upload your brokerage statement (PDF)", type="pdf")
+  const allocation = [
+    { name: "Equities", value: 68 },
+    { name: "Fixed Income", value: 22 },
+    { name: "Alternatives", value: 10 },
+  ];
 
-    if uploaded_file:
-        with pdfplumber.open(uploaded_file) as pdf:
-            text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+  const topHoldings = [
+    { name: "AAPL", value: 320000 },
+    { name: "MSFT", value: 240000 },
+    { name: "VTI", value: 180000 },
+    { name: "GOOGL", value: 150000 },
+    { name: "TSLA", value: 120000 },
+  ];
 
-        match = re.search(r"Your Net Portfolio Value: \$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)", text)
-        portfolio_value = match.group(1) if match else "Not found"
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setFileName(file.name);
+      setUploaded(true);
 
-        holdings_data = []
-        possible_holdings = re.findall(r"(?m)^(.+?)\s+\$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+(\d+)%$", text)
-        for name, value_str, percent_str in possible_holdings:
-            try:
-                cleaned_name = name.strip()
-                if re.search(r"(?i)total|balance details|summary", cleaned_name):
-                    continue
-                value = float(value_str.replace(",", ""))
-                percent = int(percent_str)
-                if value > 0 and percent > 0:
-                    holdings_data.append({"Holding": cleaned_name, "Value ($)": value, "% of Portfolio": percent})
-            except:
-                continue
+      const formData = new FormData();
+      formData.append("file", file);
 
-        df_holdings = pd.DataFrame(holdings_data)
+      try {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "gpt-4",
+            messages: [
+              { role: "system", content: "You are a financial analyst assistant helping summarize brokerage portfolios." },
+              { role: "user", content: `Parse and summarize this portfolio statement: ${file.name}. Provide insights on allocation, concentration risk, and rebalancing opportunities.` }
+            ]
+          })
+        });
 
-        col1, col2 = st.columns([2, 1])
+        const result = await response.json();
+        const aiSummary = result.choices?.[0]?.message?.content || "Unable to generate summary.";
+        setSummary(aiSummary);
+      } catch (error) {
+        console.error("AI summary error:", error);
+        setSummary("Error generating summary.");
+      }
+    }
+  };
 
-        with col1:
-            st.subheader("💼 Portfolio Overview")
-            st.metric("Net Portfolio Value", f"${portfolio_value}")
+  return (
+    <div className="p-8 max-w-7xl mx-auto space-y-8">
+      <h1 className="text-4xl font-bold tracking-tight">📊 AI-Powered Investment Dashboard</h1>
 
-            if not df_holdings.empty:
-                df_top = df_holdings.sort_values(by="Value ($)", ascending=False).head(10)
-                st.subheader("📋 Top 10 Holdings")
-                st.dataframe(df_top, use_container_width=True)
-            else:
-                st.warning("No holdings found. Please upload a properly formatted statement.")
+      <Card className="shadow-lg">
+        <CardContent className="p-6">
+          <div className="flex items-center space-x-4">
+            <Upload className="w-5 h-5 text-gray-600" />
+            <Input type="file" onChange={handleUpload} className="w-full" />
+          </div>
+          {uploaded && (
+            <p className="mt-4 text-sm text-gray-600">Uploaded: {fileName}</p>
+          )}
+        </CardContent>
+      </Card>
 
-        with col2:
-            if not df_holdings.empty:
-                st.subheader("🧩 Allocation Breakdown")
-                fig, ax = plt.subplots()
-                ax.pie(df_top["% of Portfolio"], labels=df_top["Holding"], autopct='%1.1f%%', startangle=140)
-                ax.axis('equal')
-                st.pyplot(fig)
+      {uploaded && (
+        <>
+          <Card className="shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center mb-3">
+                <FileText className="w-5 h-5 text-gray-600 mr-2" />
+                <h2 className="text-2xl font-semibold">AI Portfolio Summary</h2>
+              </div>
+              <p className="text-gray-700 text-lg leading-relaxed whitespace-pre-line">{summary}</p>
+            </CardContent>
+          </Card>
 
-        if not df_holdings.empty:
-            st.subheader("📈 Holdings Bar Chart")
-            fig2, ax2 = plt.subplots()
-            ax2.barh(df_top["Holding"], df_top["Value ($)"])
-            ax2.set_xlabel("Value ($)")
-            ax2.set_title("Top Holdings")
-            st.pyplot(fig2)
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <Card className="shadow">
+              <CardContent className="p-6">
+                <div className="flex items-center mb-3">
+                  <PieChart className="w-5 h-5 text-gray-600 mr-2" />
+                  <h2 className="text-xl font-semibold">Allocation Breakdown</h2>
+                </div>
+                <ResponsiveContainer width="100%" height={250}>
+                  <RechartsPieChart>
+                    <Pie data={allocation} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                      {allocation.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </RechartsPieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
 
-        if openai_api_key and not df_holdings.empty:
-            st.subheader("📝 AI Portfolio Summary")
-            openai.api_key = openai_api_key
-            try:
-                prompt = """Summarize this investment portfolio in a professional, clear format for a client:\n\n""" + df_top.to_string(index=False)
-                response = openai.ChatCompletion.create(
-                    model="gpt-4",
-                    messages=[
-                        {"role": "system", "content": "You are a financial analyst."},
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                summary = response['choices'][0]['message']['content']
-                st.write(summary)
-            except Exception as e:
-                st.error(f"Failed to generate AI summary: {e}")
+            <Card className="shadow">
+              <CardContent className="p-6">
+                <div className="flex items-center mb-3">
+                  <BarChart3 className="w-5 h-5 text-gray-600 mr-2" />
+                  <h2 className="text-xl font-semibold">Top Holdings</h2>
+                </div>
+                <ResponsiveContainer width="100%" height={250}>
+                  <RechartsBarChart data={topHoldings} layout="vertical">
+                    <XAxis type="number" tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                    <YAxis type="category" dataKey="name" width={70} />
+                    <Tooltip formatter={(value) => `$${value.toLocaleString()}`} />
+                    <Bar dataKey="value" fill="#4B8BBE" />
+                  </RechartsBarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
 
-        st.markdown("---")
-        st.info("Prototype view only. Upload Fidelity statements for best results.")
-
-except ModuleNotFoundError as e:
-    print("\nERROR: Missing module. Please ensure all dependencies are installed.")
-    print("\nError detail:", str(e))
-    print("\nTo fix, run:")
-    print("pip install streamlit pdfplumber matplotlib pandas openai")
-
-except Exception as e:
-    print("\nAn unexpected error occurred:", str(e))
+          <div className="flex justify-end">
+            <Button className="mt-6" variant="outline">
+              <FileDown className="w-4 h-4 mr-2" /> Download PDF Report
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
